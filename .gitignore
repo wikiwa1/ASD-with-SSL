@@ -1,0 +1,17 @@
+# data
+fan/
+*.zip
+*.tar.gz
+*.tar.bz2
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# models
+*.pt
+*.pth
+*.ckpt
