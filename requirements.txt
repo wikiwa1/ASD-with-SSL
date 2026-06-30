@@ -12,3 +12,7 @@ jupyter
 ipykernel
 ipywidgets
 tqdm
+lightning
+PyYAML
+comet_ml
+python-dotenv

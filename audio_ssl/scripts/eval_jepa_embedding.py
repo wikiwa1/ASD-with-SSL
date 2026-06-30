@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+try:  # import before torch so Comet can auto-instrument
+    import comet_ml  # noqa: F401
+except ImportError:
+    comet_ml = None
+
+import argparse
+from pathlib import Path
+
+import torch
+
+from audio_ssl.src.data.splits import find_target_dirs, make_baseline_split, parse_target_info
+from audio_ssl.src.evaluation.embedding_scores import build_scorer
+from audio_ssl.src.evaluation.eval_artifacts import compute_and_save_roc, log_results_to_comet
+from audio_ssl.src.evaluation.jepa_embeddings import embed_spectrograms, fit_set_embeddings
+from audio_ssl.src.features.spectrogram import stack_logmels
+from audio_ssl.src.lightning.jepa_module import LitJEPA
+from audio_ssl.src.utils.config import load_config, merge_cli_overrides
+from audio_ssl.src.utils.io import ensure_dir, write_yaml
+from audio_ssl.src.utils.loggers import load_env
+from audio_ssl.src.utils.runs import feature_cache_root, resolve_run_dir
+
+RUN_KEY = "jepa_global"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Evaluate the global JEPA encoder by embedding-distance one-class scoring."
+    )
+    parser.add_argument("--config", default="audio_ssl/configs/jepa_baseline.yaml")
+    parser.add_argument("--target-dir", help="Evaluate only one MIMII target directory.")
+    parser.add_argument("--base-directory", help="Override data.base_directory.")
+    parser.add_argument("--run-dir", help="Run folder to evaluate (default: the latest run).")
+    parser.add_argument("--checkpoint", help="Explicit JEPA checkpoint (default: last.ckpt in the run).")
+    parser.add_argument("--device", default=None)
+    return parser.parse_args()
+
+
+def find_checkpoint(checkpoint_root: Path) -> Path:
+    target = checkpoint_root / RUN_KEY
+    last = target / "last.ckpt"
+    if last.exists():
+        return last
+    candidates = sorted(target.glob("*.ckpt"))
+    if not candidates:
+        raise FileNotFoundError(f"No JEPA checkpoint in {target}")
+    return candidates[-1]
+
+
+def main() -> None:
+    args = parse_args()
+    config = merge_cli_overrides(load_config(args.config), args)
+    load_env()
+    data_cfg = config["data"]
+    feature_cfg = {**config["feature"], "channel": data_cfg.get("channel", 0)}
+    emb_cfg = config.get("embedding", {})
+    encoder = emb_cfg.get("encoder", "target")
+    method = emb_cfg.get("method", "mahalanobis")
+    knn_k = int(emb_cfg.get("knn_k", 4))
+
+    base_output = config["output"]["directory"]
+    output_dir = ensure_dir(resolve_run_dir(base_output, args.run_dir))
+    checkpoint_root = output_dir / "checkpoints"
+    roc_dir = ensure_dir(output_dir / "roc_embedding")
+    max_fpr = float(config.get("evaluation", {}).get("pauc_max_fpr", 0.1))
+    batch_size = int(config["fit"].get("batch_size", 256))
+    device = torch.device(args.device) if args.device else torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu")
+    cache_path = feature_cache_root(base_output) / f"jepa_specs_{feature_cfg['n_mels']}m_{feature_cfg['target_frames']}t.npy"
+    print(f"RUN DIR: {output_dir}  | scorer={method} encoder={encoder}", flush=True)
+
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else find_checkpoint(checkpoint_root)
+    module = LitJEPA.load_from_checkpoint(str(checkpoint_path), map_location=device)
+
+    target_dirs = [Path(args.target_dir)] if args.target_dir else find_target_dirs(data_cfg["base_directory"])
+
+    # One-class fit set: per-target normal-train embeddings (frozen encoder).
+    normal_emb = fit_set_embeddings(module, config, target_dirs, cache_path, feature_cfg, batch_size, device, encoder)
+
+    results = {}
+    for target_dir in target_dirs:
+        info = parse_target_info(target_dir, base_directory=data_cfg["base_directory"])
+        split = make_baseline_split(
+            target_dir,
+            normal_dir_name=data_cfg.get("normal_dir_name", "normal"),
+            abnormal_dir_name=data_cfg.get("abnormal_dir_name", "abnormal"),
+            ext=data_cfg.get("ext", "wav"),
+        )
+        eval_specs = stack_logmels(split.eval_files, msg=f"eval spectrograms {info.key}", **feature_cfg)
+        eval_emb = embed_spectrograms(
+            module, torch.from_numpy(eval_specs).unsqueeze(1), batch_size, device, encoder
+        )
+        scorer = build_scorer(method, knn_k=knn_k).fit(normal_emb[info.key])
+        scores = scorer.score(eval_emb)
+
+        results[info.key] = compute_and_save_roc(
+            roc_dir, info, scores, split.eval_labels, checkpoint_path, split.eval_files, max_fpr
+        )
+        print(f"{info.key}: AUC={results[info.key]['AUC']:.6f}  pAUC={results[info.key]['pAUC']:.6f}", flush=True)
+
+    result_path = output_dir / "result_embedding.yaml"
+    write_yaml(result_path, results)
+    print(f"wrote {result_path}", flush=True)
+
+    # Log into the same global JEPA experiment under a distinct prefix.
+    log_results_to_comet(config, checkpoint_root / RUN_KEY / "comet_experiment.txt", results, prefix="test_emb")
+
+
+if __name__ == "__main__":
+    main()
