@@ -26,19 +26,31 @@ class TargetSplit:
     eval_labels: np.ndarray
 
 
-def find_target_dirs(base_directory: str | Path) -> list[Path]:
-    """Return MIMII target dirs with normal/abnormal children.
+def find_target_dirs(base_directory: str | Path, machines: list[str] | None = None) -> list[Path]:
+    """Return MIMII target dirs with normal/abnormal children, optionally filtered to a
+    set of machine types.
 
     Supports both common layouts:
     - base/db/machine_type/id_xx/{normal,abnormal}
     - base/machine_type/id_xx/{normal,abnormal}
     """
     base = Path(base_directory)
-    return sorted(
+    dirs = sorted(
         path
         for path in base.rglob("*")
         if path.is_dir() and (path / "normal").is_dir() and (path / "abnormal").is_dir()
     )
+    if machines:
+        wanted = set(machines)
+        dirs = [d for d in dirs if parse_target_info(d, base_directory).machine_type in wanted]
+    return dirs
+
+
+def discover_targets(config: dict) -> list[Path]:
+    """Config-aware target discovery: applies the optional `data.machines` filter so an
+    experiment (e.g. fan-only JEPA) is defined entirely by its config."""
+    data_cfg = config["data"]
+    return find_target_dirs(data_cfg["base_directory"], machines=data_cfg.get("machines"))
 
 
 def parse_target_info(target_dir: str | Path, base_directory: str | Path | None = None) -> TargetInfo:

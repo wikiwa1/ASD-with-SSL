@@ -1,0 +1,16 @@
+# Fan-only JEPA with STATIONARY dynamics, for a clean training-duration / over-training
+# study: constant LR (after warmup) + constant EMA momentum, so "more steps" is the only
+# variable (schedules no longer stretch with `epochs`). Read the monitor_AUC-vs-step curve.
+# Inherits output.directory from jepa_fan -> shares jepa_fan_feature_cache (no re-extraction).
+extends: jepa_fan.yaml
+
+model:
+  ema_start: 0.999
+  ema_end: 0.999      # constant EMA -> target keeps tracking, never freezes
+
+fit:
+  lr_schedule: constant   # constant LR after warmup -> stationary optimization
+
+logging:
+  comet:
+    tags: [jepa, mimii, fan, stationary]

@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import rankdata
 
-from audio_ssl.src.data.splits import find_target_dirs, parse_target_info
+from audio_ssl.src.data.splits import discover_targets, parse_target_info
 from audio_ssl.src.evaluation.eval_artifacts import compute_and_save_roc, log_results_to_comet
 from audio_ssl.src.utils.config import load_config, merge_cli_overrides
 from audio_ssl.src.utils.io import ensure_dir, write_yaml
@@ -59,7 +59,7 @@ def main() -> None:
     print(f"RUN DIR: {output_dir}  | ensemble({args.combine}) of {score_dirs}", flush=True)
 
     info_by_key = {parse_target_info(td, base).key: parse_target_info(td, base)
-                   for td in find_target_dirs(base)}
+                   for td in discover_targets(config)}
 
     results = {}
     for key, info in info_by_key.items():

@@ -38,6 +38,7 @@ class LitJEPA(pl.LightningModule):
         lr: float = 1e-3,
         weight_decay: float = 0.05,
         warmup_frac: float = 0.1,
+        lr_schedule: str = "cosine",
         mel_mean: np.ndarray | None = None,
         mel_std: np.ndarray | None = None,
     ):
@@ -110,9 +111,13 @@ class LitJEPA(pl.LightningModule):
         total = max(1, int(self.trainer.estimated_stepping_batches))
         warmup = max(1, int(self.hparams.warmup_frac * total))
 
+        constant = self.hparams.lr_schedule == "constant"
+
         def lr_lambda(step: int) -> float:
             if step < warmup:
                 return step / warmup
+            if constant:  # stationary dynamics -> clean over-training/duration ablations
+                return 1.0
             progress = (step - warmup) / max(1, total - warmup)
             return 0.5 * (1.0 + math.cos(math.pi * progress))
 

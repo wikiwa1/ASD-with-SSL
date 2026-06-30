@@ -11,10 +11,14 @@ import time
 from pathlib import Path
 
 import lightning.pytorch as pl
+import numpy as np
+import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 from audio_ssl.src.data.jepa_datamodule import JEPASpectrogramDataModule
-from audio_ssl.src.data.splits import find_target_dirs, make_baseline_split
+from audio_ssl.src.data.splits import discover_targets, make_baseline_split
+from audio_ssl.src.features.spectrogram import stack_logmels
+from audio_ssl.src.lightning.auc_monitor import PeriodicAUCMonitor
 from audio_ssl.src.lightning.jepa_module import LitJEPA
 from audio_ssl.src.utils.config import load_config, merge_cli_overrides
 from audio_ssl.src.utils.io import ensure_dir
@@ -50,7 +54,7 @@ def parse_args() -> argparse.Namespace:
 def gather_normal_train_files(config: dict) -> list:
     data_cfg = config["data"]
     files = []
-    for target_dir in find_target_dirs(data_cfg["base_directory"]):
+    for target_dir in discover_targets(config):
         split = make_baseline_split(
             target_dir,
             normal_dir_name=data_cfg.get("normal_dir_name", "normal"),
@@ -122,6 +126,7 @@ def main() -> None:
         lr=float(fit_cfg["lr"]),
         weight_decay=float(fit_cfg.get("weight_decay", 0.05)),
         warmup_frac=float(fit_cfg.get("warmup_frac", 0.1)),
+        lr_schedule=fit_cfg.get("lr_schedule", "cosine"),
         mel_mean=datamodule.mel_mean,
         mel_std=datamodule.mel_std,
     )
@@ -147,14 +152,51 @@ def main() -> None:
     if experiment_key and global_rank == 0:
         (checkpoint_dir / "comet_experiment.txt").write_text(experiment_key)
 
+    # Periodic checkpoints (no val_loss monitor / no top-k eviction -> no DDP eviction
+    # crash). save_top_k=-1 keeps every Nth-epoch checkpoint so AUC-vs-step can be plotted;
+    # weights-only keeps them small. last.ckpt is what eval loads.
+    ckpt_cfg = config.get("checkpoint", {})
     checkpoint = ModelCheckpoint(
         dirpath=checkpoint_dir,
-        filename="{epoch:03d}-{val_loss:.6f}",
-        monitor="val_loss",
-        mode="min",
+        filename="epoch{epoch:03d}",
         save_last=True,
-        auto_insert_metric_name=False,
+        save_top_k=-1,
+        every_n_epochs=int(ckpt_cfg.get("every_n_epochs", 10)),
+        save_weights_only=True,
     )
+    callbacks = [checkpoint]
+
+    monitor_cfg = config.get("monitor", {})
+    if monitor_cfg.get("enabled", False):
+        # Pre-extract the monitor target's spectrograms ONCE, BEFORE fit, and cache them, so
+        # the callback never forks a librosa pool during training (a mid-training fork
+        # inherits Lightning's CUDA SIGTERM handler and crashes). Cached -> reused on reruns.
+        monitor_target = Path(monitor_cfg.get("target_dir", "dataset/0_dB/fan/id_00"))
+        split = make_baseline_split(monitor_target)
+        cache_key = monitor_target.as_posix().strip("./").replace("/", "_")
+        monitor_cache = feature_cache_root(base_output) / f"monitor_{cache_key}_{feature_cfg['n_mels']}m_{feature_cfg['target_frames']}t.npz"
+        if not monitor_cache.exists():
+            monitor_cache.parent.mkdir(parents=True, exist_ok=True)
+            normal = stack_logmels(split.train_files, msg="monitor fit specs", **feature_cfg)
+            evaluation = stack_logmels(split.eval_files, msg="monitor eval specs", **feature_cfg)
+            tmp = monitor_cache.with_suffix(".tmp.npz")
+            np.savez(tmp, normal=normal, evaluation=evaluation, labels=split.eval_labels)
+            tmp.replace(monitor_cache)
+        with np.load(monitor_cache) as cached:
+            normal_specs = torch.from_numpy(cached["normal"]).unsqueeze(1)
+            eval_specs = torch.from_numpy(cached["evaluation"]).unsqueeze(1)
+            labels = cached["labels"]
+        callbacks.append(
+            PeriodicAUCMonitor(
+                normal_specs, eval_specs, labels,
+                every_n_epochs=int(monitor_cfg.get("every_n_epochs", 1)),
+                batch_size=int(fit_cfg["batch_size"]),
+                encoder=monitor_cfg.get("encoder", "target"),
+                method=monitor_cfg.get("method", "mahalanobis"),
+                metric_name=monitor_cfg.get("metric_name", "monitor_AUC"),
+            )
+        )
+
     trainer = pl.Trainer(
         max_epochs=int(fit_cfg["epochs"]),
         accelerator=trainer_cfg.get("accelerator", "auto"),
@@ -164,12 +206,12 @@ def main() -> None:
         precision=trainer_cfg.get("precision", "bf16-mixed"),
         gradient_clip_val=float(trainer_cfg.get("gradient_clip_val", 1.0)),
         log_every_n_steps=int(trainer_cfg.get("log_every_n_steps", 20)),
-        callbacks=[checkpoint],
+        callbacks=callbacks,
         logger=loggers,
     )
     trainer.fit(module, datamodule=datamodule)
     end_experiments(loggers)
-    print(f"{RUN_KEY}: best checkpoint -> {checkpoint.best_model_path}", flush=True)
+    print(f"{RUN_KEY}: checkpoints -> {checkpoint_dir}", flush=True)
 
 
 if __name__ == "__main__":

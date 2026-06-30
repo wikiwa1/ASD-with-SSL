@@ -6,6 +6,7 @@ data:
   abnormal_dir_name: abnormal
   ext: wav
   channel: 0
+  machines: null   # null = all machines; e.g. [fan] for a single-machine experiment
 
 feature:
   n_mels: 64
@@ -31,11 +32,12 @@ model:
   ema_end: 1.0
 
 fit:
-  epochs: 150
+  epochs: 3000
   batch_size: 256
   lr: 0.001
   weight_decay: 0.05
   warmup_frac: 0.1
+  lr_schedule: cosine   # cosine-to-0 (tie to budget) | constant (stationary, for duration ablations)
   val_split: 0.02
   num_workers: 8
 
@@ -59,6 +61,20 @@ embedding:
   encoder: target          # target (EMA) or context
   method: mahalanobis      # mahalanobis (Ledoit-Wolf) or knn (cosine)
   knn_k: 4
+
+checkpoint:
+  every_n_epochs: 10   # keep a weights-only checkpoint every N epochs (for AUC-vs-step)
+
+monitor:
+  # Diagnostic AUC logged to Comet during training (embedding-distance on one target's
+  # TEST split). Reveals SSL over-optimization (AUC peaks then declines while loss drops).
+  # DIAGNOSTIC ONLY — do not use for final checkpoint selection.
+  enabled: true
+  target_dir: dataset/0_dB/fan/id_00
+  every_n_epochs: 1
+  encoder: target
+  method: mahalanobis
+  metric_name: monitor_AUC
 
 output:
   directory: audio_ssl/outputs/jepa_baseline

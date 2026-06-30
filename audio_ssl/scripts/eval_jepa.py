@@ -10,7 +10,7 @@ from pathlib import Path
 
 import torch
 
-from audio_ssl.src.data.splits import find_target_dirs, make_baseline_split, parse_target_info
+from audio_ssl.src.data.splits import discover_targets, make_baseline_split, parse_target_info
 from audio_ssl.src.evaluation.eval_artifacts import compute_and_save_roc, log_results_to_comet
 from audio_ssl.src.evaluation.jepa_scores import score_spectrograms
 from audio_ssl.src.features.spectrogram import stack_logmels
@@ -67,7 +67,7 @@ def main() -> None:
     if args.target_dir:
         target_dirs = [Path(args.target_dir)]
     else:
-        target_dirs = find_target_dirs(data_cfg["base_directory"])
+        target_dirs = discover_targets(config)
 
     results = {}
     for target_dir in target_dirs:

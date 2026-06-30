@@ -10,7 +10,7 @@ from pathlib import Path
 
 import torch
 
-from audio_ssl.src.data.splits import find_target_dirs, make_baseline_split, parse_target_info
+from audio_ssl.src.data.splits import discover_targets, make_baseline_split, parse_target_info
 from audio_ssl.src.evaluation.embedding_scores import build_scorer
 from audio_ssl.src.evaluation.eval_artifacts import compute_and_save_roc, log_results_to_comet
 from audio_ssl.src.evaluation.jepa_embeddings import embed_spectrograms, fit_set_embeddings
@@ -73,7 +73,7 @@ def main() -> None:
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else find_checkpoint(checkpoint_root)
     module = LitJEPA.load_from_checkpoint(str(checkpoint_path), map_location=device)
 
-    target_dirs = [Path(args.target_dir)] if args.target_dir else find_target_dirs(data_cfg["base_directory"])
+    target_dirs = [Path(args.target_dir)] if args.target_dir else discover_targets(config)
 
     # One-class fit set: per-target normal-train embeddings (frozen encoder).
     normal_emb = fit_set_embeddings(module, config, target_dirs, cache_path, feature_cfg, batch_size, device, encoder)

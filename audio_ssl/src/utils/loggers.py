@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from lightning.pytorch.loggers import CSVLogger, Logger
+from lightning.pytorch.loggers import Logger
 
 try:  # imported before torch elsewhere so Comet can auto-instrument
     import comet_ml  # noqa: F401
@@ -56,11 +56,13 @@ def build_loggers(
     config: dict,
     extra_params: dict[str, Any] | None = None,
 ) -> list[Logger]:
-    """Build Lightning loggers for one training run (one MIMII target).
+    """Build Lightning loggers for one training run.
 
-    Always returns a CSVLogger. Appends a CometLogger when `logging.comet.enabled`
-    is true in the config, comet_ml is installed, and a COMET_API_KEY is available.
-    Method-agnostic: any SSL method's train script can call this.
+    Returns a single CometLogger on global rank 0 when `logging.comet.enabled` is true,
+    comet_ml is installed, and a COMET_API_KEY is available; otherwise returns NO logger.
+    We deliberately do NOT use Lightning's CSVLogger — its header-rewrite crashes under
+    DDP ("dict contains fields not in fieldnames") with our train/val logging cadence, and
+    Comet already captures the curves. `csv_save_dir` is accepted for signature stability.
 
     Comet config (under `logging.comet` in the YAML):
       enabled: bool             turn Comet on/off
@@ -69,21 +71,21 @@ def build_loggers(
       offline_directory: str    null -> <output.directory>/comet_offline (offline only)
       tags: list[str]           applied to every experiment
     """
-    loggers: list[Logger] = [CSVLogger(save_dir=str(csv_save_dir), name=run_name)]
+    no_loggers: list[Logger] = []
 
     comet_cfg = (config.get("logging") or {}).get("comet") or {}
     if not comet_cfg.get("enabled", False):
-        return loggers
+        return no_loggers
     if _env_rank() != 0:
-        return loggers  # DDP-safe: only global rank 0 creates a Comet experiment
+        return no_loggers  # DDP-safe: only global rank 0 creates a Comet experiment
     if not _COMET_INSTALLED:
-        print("[loggers] logging.comet.enabled but comet_ml is not installed; skipping Comet.", flush=True)
-        return loggers
+        print("[loggers] logging.comet.enabled but comet_ml is not installed; no logger.", flush=True)
+        return no_loggers
 
     api_key = os.environ.get("COMET_API_KEY")
     if not api_key:
-        print("[loggers] COMET_API_KEY not set (.env not loaded?); skipping Comet.", flush=True)
-        return loggers
+        print("[loggers] COMET_API_KEY not set (.env not loaded?); no logger.", flush=True)
+        return no_loggers
 
     online = bool(comet_cfg.get("online", True))
     kwargs: dict[str, Any] = {"name": run_name}
@@ -122,8 +124,8 @@ def build_loggers(
     )
     if extra_params:
         comet_logger.log_hyperparams(extra_params)
-    loggers.append(comet_logger)
-    return loggers
+    print("[loggers] logging to Comet (no CSVLogger).", flush=True)
+    return [comet_logger]
 
 
 def end_experiments(loggers: list[Logger]) -> None:

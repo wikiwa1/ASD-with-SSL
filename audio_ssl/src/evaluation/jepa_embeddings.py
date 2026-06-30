@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from audio_ssl.src.data.splits import find_target_dirs, make_baseline_split, parse_target_info
+from audio_ssl.src.data.splits import discover_targets, make_baseline_split, parse_target_info
 from audio_ssl.src.features.spectrogram import stack_logmels
 
 
@@ -53,7 +53,7 @@ def normal_train_embeddings_by_target(
 
     out: dict[str, np.ndarray] = {}
     offset = 0
-    for target_dir in find_target_dirs(data_cfg["base_directory"]):
+    for target_dir in discover_targets(config):
         info = parse_target_info(target_dir, base_directory=data_cfg["base_directory"])
         split = make_baseline_split(
             target_dir,
@@ -90,7 +90,7 @@ def fit_set_embeddings(
     spectrogram cache for a full-dataset run; otherwise extracts the given targets'
     train clips on the fly (e.g. when evaluating a single --target-dir)."""
     data_cfg = config["data"]
-    all_dirs = find_target_dirs(data_cfg["base_directory"])
+    all_dirs = discover_targets(config)
     full_run = Path(cache_path).exists() and {str(p) for p in target_dirs} == {str(p) for p in all_dirs}
     if full_run:
         return normal_train_embeddings_by_target(module, config, cache_path, batch_size, device, encoder)
