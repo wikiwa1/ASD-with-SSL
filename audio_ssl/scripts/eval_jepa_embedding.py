@@ -33,6 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-directory", help="Override data.base_directory.")
     parser.add_argument("--run-dir", help="Run folder to evaluate (default: the latest run).")
     parser.add_argument("--checkpoint", help="Explicit JEPA checkpoint (default: last.ckpt in the run).")
+    parser.add_argument("--tag", default="", help="Suffix for outputs so a specific-checkpoint eval "
+                        "does not clobber the final one, e.g. --tag epoch220.")
     parser.add_argument("--device", default=None)
     return parser.parse_args()
 
@@ -59,10 +61,11 @@ def main() -> None:
     method = emb_cfg.get("method", "mahalanobis")
     knn_k = int(emb_cfg.get("knn_k", 4))
 
+    tag = f"_{args.tag}" if args.tag else ""
     base_output = config["output"]["directory"]
     output_dir = ensure_dir(resolve_run_dir(base_output, args.run_dir))
     checkpoint_root = output_dir / "checkpoints"
-    roc_dir = ensure_dir(output_dir / "roc_embedding")
+    roc_dir = ensure_dir(output_dir / f"roc_embedding{tag}")
     max_fpr = float(config.get("evaluation", {}).get("pauc_max_fpr", 0.1))
     batch_size = int(config["fit"].get("batch_size", 256))
     device = torch.device(args.device) if args.device else torch.device(
@@ -99,12 +102,12 @@ def main() -> None:
         )
         print(f"{info.key}: AUC={results[info.key]['AUC']:.6f}  pAUC={results[info.key]['pAUC']:.6f}", flush=True)
 
-    result_path = output_dir / "result_embedding.yaml"
+    result_path = output_dir / f"result_embedding{tag}.yaml"
     write_yaml(result_path, results)
     print(f"wrote {result_path}", flush=True)
 
     # Log into the same global JEPA experiment under a distinct prefix.
-    log_results_to_comet(config, checkpoint_root / RUN_KEY / "comet_experiment.txt", results, prefix="test_emb")
+    log_results_to_comet(config, checkpoint_root / RUN_KEY / "comet_experiment.txt", results, prefix=f"test_emb{tag}")
 
 
 if __name__ == "__main__":
