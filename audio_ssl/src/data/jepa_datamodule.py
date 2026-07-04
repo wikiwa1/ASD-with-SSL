@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from audio_ssl.src.features.spectrogram import stack_logmels
+from audio_ssl.src.features.frontends import stack_features
 
 
 class JEPASpectrogramDataModule(pl.LightningDataModule):
@@ -47,7 +47,7 @@ class JEPASpectrogramDataModule(pl.LightningDataModule):
             specs = np.load(self.cache_path, mmap_mode="r")
             if specs.shape[0] == len(self.train_files):
                 return np.asarray(specs)
-        specs = stack_logmels(self.train_files, msg="extract JEPA spectrograms", **self.feature_kwargs)
+        specs = stack_features(self.train_files, msg="extract JEPA spectrograms", **self.feature_kwargs)
         if self.cache_path:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.cache_path.with_suffix(".tmp.npy")

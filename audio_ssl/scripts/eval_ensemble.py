@@ -49,7 +49,10 @@ def combine(score_arrays: list[np.ndarray], method: str) -> np.ndarray:
 
 def main() -> None:
     args = parse_args()
-    config = merge_cli_overrides(load_config(args.config), args)
+    config_path = args.config
+    if args.run_dir and (Path(args.run_dir) / "config.yaml").exists():
+        config_path = str(Path(args.run_dir) / "config.yaml")  # self-describing run -> correct machines
+    config = merge_cli_overrides(load_config(config_path), args)
     load_env()
     base = config["data"]["base_directory"]
     score_dirs = args.score_dir or ["roc", "roc_embedding"]

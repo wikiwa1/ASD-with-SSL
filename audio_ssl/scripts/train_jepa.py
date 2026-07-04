@@ -17,11 +17,11 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 from audio_ssl.src.data.jepa_datamodule import JEPASpectrogramDataModule
 from audio_ssl.src.data.splits import discover_targets, make_baseline_split
-from audio_ssl.src.features.spectrogram import stack_logmels
+from audio_ssl.src.features.frontends import stack_features
 from audio_ssl.src.lightning.auc_monitor import PeriodicAUCMonitor
 from audio_ssl.src.lightning.jepa_module import LitJEPA
 from audio_ssl.src.utils.config import load_config, merge_cli_overrides
-from audio_ssl.src.utils.io import ensure_dir
+from audio_ssl.src.utils.io import ensure_dir, write_yaml
 from audio_ssl.src.utils.loggers import build_loggers, comet_experiment_key, end_experiments, load_env
 from audio_ssl.src.utils.runs import create_run_dir, feature_cache_root
 from audio_ssl.src.utils.seed import seed_everything
@@ -83,6 +83,12 @@ def main() -> None:
     log_root = ensure_dir(output_dir / "logs")
     cache_path = feature_cache_root(base_output) / f"jepa_specs_{feature_cfg['n_mels']}m_{feature_cfg['target_frames']}t.npy"
     print(f"RUN DIR: {output_dir}", flush=True)
+    if global_rank_from_env() == 0:
+        # Make the run self-describing so eval uses the SAME machines/features/cache
+        # instead of trusting whatever --config the user later passes.
+        cfg_tmp = output_dir / f".config.{os.getpid()}.tmp"
+        write_yaml(cfg_tmp, config)
+        cfg_tmp.replace(output_dir / "config.yaml")
 
     train_files = gather_normal_train_files(config)
     print(f"pooled {len(train_files)} normal-train clips across all targets", flush=True)
@@ -132,7 +138,7 @@ def main() -> None:
     )
 
     loggers = build_loggers(
-        run_name=RUN_KEY,
+        run_name=output_dir.name,
         csv_save_dir=log_root,
         config=config,
         extra_params={
@@ -177,8 +183,8 @@ def main() -> None:
         monitor_cache = feature_cache_root(base_output) / f"monitor_{cache_key}_{feature_cfg['n_mels']}m_{feature_cfg['target_frames']}t.npz"
         if not monitor_cache.exists():
             monitor_cache.parent.mkdir(parents=True, exist_ok=True)
-            normal = stack_logmels(split.train_files, msg="monitor fit specs", **feature_cfg)
-            evaluation = stack_logmels(split.eval_files, msg="monitor eval specs", **feature_cfg)
+            normal = stack_features(split.train_files, msg="monitor fit specs", **feature_cfg)
+            evaluation = stack_features(split.eval_files, msg="monitor eval specs", **feature_cfg)
             tmp = monitor_cache.with_suffix(".tmp.npz")
             np.savez(tmp, normal=normal, evaluation=evaluation, labels=split.eval_labels)
             tmp.replace(monitor_cache)
@@ -189,10 +195,9 @@ def main() -> None:
         callbacks.append(
             PeriodicAUCMonitor(
                 normal_specs, eval_specs, labels,
+                emb_cfg=config.get("embedding", {}),
                 every_n_epochs=int(monitor_cfg.get("every_n_epochs", 1)),
                 batch_size=int(fit_cfg["batch_size"]),
-                encoder=monitor_cfg.get("encoder", "target"),
-                method=monitor_cfg.get("method", "mahalanobis"),
                 metric_name=monitor_cfg.get("metric_name", "monitor_AUC"),
             )
         )

@@ -13,7 +13,7 @@ import torch
 from audio_ssl.src.data.splits import discover_targets, make_baseline_split, parse_target_info
 from audio_ssl.src.evaluation.eval_artifacts import compute_and_save_roc, log_results_to_comet
 from audio_ssl.src.evaluation.jepa_scores import score_spectrograms
-from audio_ssl.src.features.spectrogram import stack_logmels
+from audio_ssl.src.features.frontends import stack_features
 from audio_ssl.src.lightning.jepa_module import LitJEPA
 from audio_ssl.src.utils.config import load_config, merge_cli_overrides
 from audio_ssl.src.utils.io import ensure_dir, write_yaml
@@ -47,7 +47,10 @@ def find_checkpoint(checkpoint_root: Path) -> Path:
 
 def main() -> None:
     args = parse_args()
-    config = merge_cli_overrides(load_config(args.config), args)
+    config_path = args.config
+    if args.run_dir and (Path(args.run_dir) / "config.yaml").exists():
+        config_path = str(Path(args.run_dir) / "config.yaml")  # self-describing run -> correct machines/cache
+    config = merge_cli_overrides(load_config(config_path), args)
     load_env()
     data_cfg = config["data"]
     feature_cfg = {**config["feature"], "channel": data_cfg.get("channel", 0)}
@@ -78,7 +81,7 @@ def main() -> None:
             abnormal_dir_name=data_cfg.get("abnormal_dir_name", "abnormal"),
             ext=data_cfg.get("ext", "wav"),
         )
-        specs = stack_logmels(split.eval_files, msg=f"spectrograms {info.key}", **feature_cfg)
+        specs = stack_features(split.eval_files, msg=f"spectrograms {info.key}", **feature_cfg)
         specs = torch.from_numpy(specs).unsqueeze(1)  # (N, 1, M, T)
         scores = score_spectrograms(module, specs, num_masks=num_masks, batch_size=batch_size, device=device)
 

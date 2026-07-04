@@ -28,20 +28,19 @@ class PeriodicAUCMonitor(pl.Callback):
         normal_specs: torch.Tensor,
         eval_specs: torch.Tensor,
         labels: np.ndarray,
+        emb_cfg: dict,
         every_n_epochs: int = 1,
         batch_size: int = 256,
-        encoder: str = "target",
-        method: str = "mahalanobis",
         metric_name: str = "monitor_AUC",
     ):
         super().__init__()
         self.normal_specs = normal_specs  # (N, 1, n_mels, T)
         self.eval_specs = eval_specs
         self.labels = labels
+        self.emb_cfg = emb_cfg  # same scorer as eval (encoder/method/pca_dim/...)
         self.every_n_epochs = max(1, int(every_n_epochs))
         self.batch_size = int(batch_size)
-        self.encoder = encoder
-        self.method = method
+        self.encoder = emb_cfg.get("encoder", "target")
         self.metric_name = metric_name
 
     @torch.inference_mode()
@@ -55,7 +54,7 @@ class PeriodicAUCMonitor(pl.Callback):
             device = pl_module.device
             normal = embed_spectrograms(pl_module, self.normal_specs, self.batch_size, device, self.encoder)
             evaluation = embed_spectrograms(pl_module, self.eval_specs, self.batch_size, device, self.encoder)
-            scores = build_scorer(self.method).fit(normal).score(evaluation)
+            scores = build_scorer(self.emb_cfg).fit(normal).score(evaluation)
             auc = float(roc_auc(self.labels, scores))
         except Exception as exc:  # never let a monitor probe kill training
             print(f"[monitor] skipped at epoch {trainer.current_epoch + 1}: {exc}", flush=True)

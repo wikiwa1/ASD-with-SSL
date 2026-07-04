@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from audio_ssl.src.data.splits import discover_targets, make_baseline_split, parse_target_info
-from audio_ssl.src.features.spectrogram import stack_logmels
+from audio_ssl.src.features.frontends import stack_features
 
 
 @torch.inference_mode()
@@ -104,7 +104,7 @@ def fit_set_embeddings(
             abnormal_dir_name=data_cfg.get("abnormal_dir_name", "abnormal"),
             ext=data_cfg.get("ext", "wav"),
         )
-        specs = stack_logmels(split.train_files, msg=f"train spectrograms {info.key}", **feature_cfg)
+        specs = stack_features(split.train_files, msg=f"train spectrograms {info.key}", **feature_cfg)
         out[info.key] = embed_spectrograms(
             module, torch.from_numpy(specs).unsqueeze(1), batch_size, device, encoder
         )

@@ -14,8 +14,8 @@ from audio_ssl.src.data.splits import discover_targets, make_baseline_split, par
 from audio_ssl.src.evaluation.embedding_scores import build_scorer
 from audio_ssl.src.evaluation.eval_artifacts import compute_and_save_roc, log_results_to_comet
 from audio_ssl.src.evaluation.jepa_embeddings import embed_spectrograms, fit_set_embeddings
-from audio_ssl.src.features.spectrogram import stack_logmels
-from audio_ssl.src.lightning.jepa_module import LitJEPA
+from audio_ssl.src.features.frontends import stack_features
+from audio_ssl.src.lightning.loader import load_ssl_module
 from audio_ssl.src.utils.config import load_config, merge_cli_overrides
 from audio_ssl.src.utils.io import ensure_dir, write_yaml
 from audio_ssl.src.utils.loggers import load_env
@@ -35,6 +35,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", help="Explicit JEPA checkpoint (default: last.ckpt in the run).")
     parser.add_argument("--tag", default="", help="Suffix for outputs so a specific-checkpoint eval "
                         "does not clobber the final one, e.g. --tag epoch220.")
+    parser.add_argument("--method", help="Override embedding.method (mahalanobis|knn|gmm|flow).")
+    parser.add_argument("--pca-dim", type=int, help="Override embedding.pca_dim.")
     parser.add_argument("--device", default=None)
     return parser.parse_args()
 
@@ -52,14 +54,21 @@ def find_checkpoint(checkpoint_root: Path) -> Path:
 
 def main() -> None:
     args = parse_args()
-    config = merge_cli_overrides(load_config(args.config), args)
+    config_path = args.config
+    if args.run_dir and (Path(args.run_dir) / "config.yaml").exists():
+        config_path = str(Path(args.run_dir) / "config.yaml")  # self-describing run -> correct machines/cache
+        print(f"[eval] using run config: {config_path}", flush=True)
+    config = merge_cli_overrides(load_config(config_path), args)
     load_env()
     data_cfg = config["data"]
     feature_cfg = {**config["feature"], "channel": data_cfg.get("channel", 0)}
-    emb_cfg = config.get("embedding", {})
+    emb_cfg = dict(config.get("embedding", {}))
+    if args.method:
+        emb_cfg["method"] = args.method
+    if args.pca_dim is not None:
+        emb_cfg["pca_dim"] = args.pca_dim
     encoder = emb_cfg.get("encoder", "target")
     method = emb_cfg.get("method", "mahalanobis")
-    knn_k = int(emb_cfg.get("knn_k", 4))
 
     tag = f"_{args.tag}" if args.tag else ""
     base_output = config["output"]["directory"]
@@ -74,7 +83,7 @@ def main() -> None:
     print(f"RUN DIR: {output_dir}  | scorer={method} encoder={encoder}", flush=True)
 
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else find_checkpoint(checkpoint_root)
-    module = LitJEPA.load_from_checkpoint(str(checkpoint_path), map_location=device)
+    module = load_ssl_module(config, checkpoint_path, device)
 
     target_dirs = [Path(args.target_dir)] if args.target_dir else discover_targets(config)
 
@@ -90,11 +99,11 @@ def main() -> None:
             abnormal_dir_name=data_cfg.get("abnormal_dir_name", "abnormal"),
             ext=data_cfg.get("ext", "wav"),
         )
-        eval_specs = stack_logmels(split.eval_files, msg=f"eval spectrograms {info.key}", **feature_cfg)
+        eval_specs = stack_features(split.eval_files, msg=f"eval spectrograms {info.key}", **feature_cfg)
         eval_emb = embed_spectrograms(
             module, torch.from_numpy(eval_specs).unsqueeze(1), batch_size, device, encoder
         )
-        scorer = build_scorer(method, knn_k=knn_k).fit(normal_emb[info.key])
+        scorer = build_scorer(emb_cfg).fit(normal_emb[info.key])
         scores = scorer.score(eval_emb)
 
         results[info.key] = compute_and_save_roc(

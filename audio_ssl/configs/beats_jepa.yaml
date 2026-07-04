@@ -1,0 +1,96 @@
+seed: 42
+
+arch: beats   # selects LitBEATsJEPA in training + embedding eval
+
+data:
+  base_directory: ./dataset
+  normal_dir_name: normal
+  abnormal_dir_name: abnormal
+  ext: wav
+  channel: 0
+  machines: null   # null = all machines; e.g. [fan] for a single-machine experiment
+
+feature:
+  # BEATs frontend (fixed by the pretrained model): 128-bin kaldi fbank, 25ms/10ms,
+  # BEATs normalization constants baked into the cache. 10-s clip -> 998 frames ->
+  # 62x8 = 496 patch tokens.
+  frontend: beats_fbank
+  n_mels: 128
+  target_frames: 998
+
+model:
+  # Continued SSL (data2vec-style JEPA) on a pretrained BEATs_iter3+ (AS2M) encoder:
+  # EMA teacher sees the full fbank; student sees mask-token-substituted patch
+  # embeddings; a small head predicts teacher tokens at masked positions. Only the last
+  # finetune_last_n transformer layers (+ mask token + head) train; 0 = frozen probe.
+  beats_checkpoint: audio_ssl/pretrained/BEATs_iter3_plus_AS2M.pt
+  finetune_last_n: 2
+  head_hidden: 768
+  num_blocks: 4
+  mask_scale: [0.15, 0.3]
+  mask_aspect: [0.5, 2.0]
+  ema_start: 0.999      # higher than scratch JEPA: pretrained teacher should drift slowly
+  ema_end: 1.0
+
+fit:
+  epochs: 100           # continued pretraining converges far faster than from-scratch
+  batch_size: 48        # 496 tokens x 768-d x 12 layers; fits A100-40GB in bf16
+  lr: 0.0001            # gentle: pretrained weights are easy to wreck
+  weight_decay: 0.01
+  warmup_frac: 0.1
+  lr_schedule: cosine
+  val_split: 0.02
+  num_workers: 8
+
+trainer:
+  accelerator: auto
+  devices: auto
+  num_nodes: 1
+  strategy: auto
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+
+embedding:
+  # One-class scorer on frozen-encoder embeddings (768-d mean-pooled tokens).
+  encoder: target          # target (EMA teacher) or context (student)
+  method: mahalanobis
+  pca_dim: 128             # 768-d vs ~900 fit clips/target -> whiten first
+  knn_k: 4
+  gmm_components: 4
+  flow_type: rqs
+  flow_layers: 4
+  flow_hidden: 128
+  flow_bins: 8
+  flow_epochs: 400
+  flow_lr: 0.001
+  flow_val_frac: 0.15
+  flow_patience: 30
+  flow_weight_decay: 0.00001
+
+checkpoint:
+  every_n_epochs: 5    # finetuning drifts fast; keep a dense checkpoint trail
+
+monitor:
+  # Live AUC on fan/id_00 0dB with the embedding scorer above — catches the expected
+  # failure mode of finetuning a strong prior on a narrow domain (peak then decline).
+  enabled: true
+  target_dir: dataset/0_dB/fan/id_00
+  every_n_epochs: 1
+  metric_name: monitor_AUC
+
+output:
+  directory: audio_ssl/outputs/beats_jepa
+  result_file: result.yaml
+
+evaluation:
+  pauc_max_fpr: 0.1
+
+logging:
+  comet:
+    enabled: true
+    online: true
+    workspace: null
+    project: null
+    offline_directory: null
+    tags: [beats, jepa, mimii, pretrained, data2vec-style]

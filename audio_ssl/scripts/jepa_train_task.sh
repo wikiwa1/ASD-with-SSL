@@ -5,6 +5,7 @@ set -e
 module load conda
 conda activate asd-ssl
 cd "$REPO"
-python -m audio_ssl.scripts.train_jepa \
+# TRAIN_MODULE selects the pretraining entrypoint (JEPA by default; LeJEPA overrides it).
+python -m "${TRAIN_MODULE:-audio_ssl.scripts.train_jepa}" \
   --config "$CONFIG" --run-dir "$RUNDIR" \
   --accelerator gpu --devices "$GPUS_PER_NODE" --num-nodes "$NODES" --strategy ddp

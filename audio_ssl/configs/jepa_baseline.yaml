@@ -56,11 +56,26 @@ scoring:
   num_masks: 16
 
 embedding:
-  # Alternative scorer (eval_jepa_embedding): one-class distance on frozen-encoder
-  # embeddings. No retraining. encoder=target (EMA) saw full clips during pretraining.
+  # One-class scorer on frozen-encoder embeddings (no retraining). encoder=target (EMA)
+  # saw full clips during pretraining.
   encoder: target          # target (EMA) or context
-  method: mahalanobis      # mahalanobis (Ledoit-Wolf) or knn (cosine)
+  method: mahalanobis      # mahalanobis (Ledoit-Wolf) | knn (cosine) | gmm | flow
+  pca_dim: null            # whiten+reduce to this dim before density estimation (null=keep full)
   knn_k: 4
+  gmm_components: 4        # for method: gmm
+  # method: flow — MAF + rational-quadratic splines (flow_type: rqs) with standardized
+  # inputs, seeded val split, early stopping on val NLL + best-weights restore (one-line
+  # summary printed per fit; curves in scorer.history). flow_type: realnvp = legacy
+  # bounded-affine couplings, kept for comparison. Pair with pca_dim ~32.
+  flow_type: rqs           # rqs | realnvp
+  flow_layers: 4
+  flow_hidden: 128
+  flow_bins: 8             # spline bins per dim per layer
+  flow_epochs: 400         # max epochs; early stopping usually ends sooner
+  flow_lr: 0.001
+  flow_val_frac: 0.15
+  flow_patience: 30
+  flow_weight_decay: 0.00001
 
 checkpoint:
   every_n_epochs: 10   # keep a weights-only checkpoint every N epochs (for AUC-vs-step)
@@ -72,9 +87,7 @@ monitor:
   enabled: true
   target_dir: dataset/0_dB/fan/id_00
   every_n_epochs: 1
-  encoder: target
-  method: mahalanobis
-  metric_name: monitor_AUC
+  metric_name: monitor_AUC   # uses the `embedding` scorer above
 
 output:
   directory: audio_ssl/outputs/jepa_baseline

@@ -12,8 +12,10 @@ set -euo pipefail
 export REPO=/pscratch/sd/d/dfarough/ASD-with-SSL
 export CONFIG="${CONFIG:-audio_ssl/configs/jepa_baseline.yaml}"
 export RUNDIR="${1:-audio_ssl/outputs/jepa_baseline_latest}"
-export CKPT="${CKPT:-}"   # optional: explicit checkpoint path to evaluate
-export TAG="${TAG:-}"     # optional: output suffix (e.g. epoch220) to avoid clobbering
+export CKPT="${CKPT:-}"       # optional: explicit checkpoint path to evaluate
+export TAG="${TAG:-}"         # optional: output suffix (e.g. epoch220) to avoid clobbering
+export METHOD="${METHOD:-}"   # optional: override embedding.method (mahalanobis|knn|gmm|flow)
+export PCADIM="${PCADIM:-}"   # optional: override embedding.pca_dim
 WALLTIME="${2:-00:40:00}"
 ACCOUNT="${NERSC_ACCOUNT:-m4539}"
 

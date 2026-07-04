@@ -133,7 +133,7 @@ def main() -> None:
             auto_insert_metric_name=False,
         )
         loggers = build_loggers(
-            run_name=info.key,
+            run_name=f"{output_dir.name}/{info.key}",
             csv_save_dir=log_root,
             config=config,
             extra_params={
