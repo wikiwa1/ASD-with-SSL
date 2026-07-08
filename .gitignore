@@ -1,8 +1,13 @@
 # data
+dataset/
+dataset_colab/
 fan/
 *.zip
 *.tar.gz
 *.tar.bz2
+
+# local secrets / runtime config
+.env
 
 # python
 .venv/
@@ -15,3 +20,6 @@ __pycache__/
 *.pt
 *.pth
 *.ckpt
+
+# experiment outputs
+audio_ssl/outputs/

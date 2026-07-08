@@ -1,0 +1,13 @@
+# Fan-only JEPA: same model/training as the global baseline, trained + evaluated on fan
+# targets alone. Everything else is inherited from jepa_baseline.yaml.
+extends: jepa_baseline.yaml
+
+data:
+  machines: [fan]
+
+output:
+  directory: audio_ssl/outputs/jepa_fan
+
+logging:
+  comet:
+    tags: [jepa, mimii, fan]

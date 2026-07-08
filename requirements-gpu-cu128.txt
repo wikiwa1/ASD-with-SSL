@@ -1,0 +1,8 @@
+# CUDA-enabled PyTorch stack for Perlmutter GPU nodes.
+# Install after the base requirements:
+#   python -m pip install -r requirements-gpu-cu128.txt
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+torchaudio==2.11.0+cu128
+

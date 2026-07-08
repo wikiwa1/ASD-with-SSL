@@ -1,0 +1,97 @@
+seed: 42
+
+arch: lejepa   # selects LitLeJEPA in training + embedding eval
+
+data:
+  base_directory: ./dataset
+  normal_dir_name: normal
+  abnormal_dir_name: abnormal
+  ext: wav
+  channel: 0
+  machines: null   # null = all machines; e.g. [fan] for a single-machine experiment
+
+feature:
+  n_mels: 64
+  n_fft: 1024
+  hop_length: 512
+  power: 2.0
+  target_frames: 313
+
+model:
+  patch_mels: 16
+  patch_frames: 16
+  embed_dim: 256
+  depth: 6
+  heads: 4
+  mlp_ratio: 4.0
+
+lejepa:
+  # LeJEPA (Balestriero & LeCun 2025, arXiv:2511.08544): encoder-only, no EMA/predictor.
+  num_views: 4        # augmented views per clip (invariance is averaged over them)
+  lam: 0.05           # SIGReg weight in loss = (1-lam)*view_invariance + lam*sigreg
+  sigreg_slices: 512  # random 1-D projections per step for the isotropic-Gaussian test
+  sigreg_points: 17   # Epps-Pulley characteristic-function quadrature points
+
+augment:
+  # SpecAugment-style nuisance transforms for log-mel views (my audio adaptation of the
+  # paper's image augmentations). Kept mild to preserve machine-sound identity.
+  time_roll_frames: 20
+  offset: 1.0
+  noise_std: 0.5
+  time_mask_frames: 30
+  freq_mask_bins: 8
+
+fit:
+  epochs: 3000
+  batch_size: 64      # encoder sees batch_size * num_views = 256 (matches JEPA's footprint)
+  lr: 0.0005          # paper: 5e-4
+  weight_decay: 0.05
+  warmup_frac: 0.1
+  lr_schedule: cosine
+  val_split: 0.02
+  num_workers: 8
+
+trainer:
+  accelerator: auto
+  devices: auto
+  num_nodes: 1
+  strategy: auto
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+
+embedding:
+  # LeJEPA embeddings are isotropic-Gaussian by construction -> Mahalanobis is well-specified.
+  encoder: target          # target/context are the same encoder for LeJEPA
+  method: mahalanobis      # mahalanobis (Ledoit-Wolf) | knn | gmm | flow
+  pca_dim: null
+  knn_k: 4
+  gmm_components: 4
+  flow_layers: 4
+  flow_hidden: 128
+  flow_epochs: 200
+
+checkpoint:
+  every_n_epochs: 10
+
+monitor:
+  enabled: true
+  target_dir: dataset/0_dB/fan/id_00
+  every_n_epochs: 1
+  metric_name: monitor_AUC
+
+output:
+  directory: audio_ssl/outputs/lejepa_baseline
+  result_file: result.yaml
+
+evaluation:
+  pauc_max_fpr: 0.1
+
+logging:
+  comet:
+    enabled: true
+    online: true
+    workspace: null
+    project: null
+    offline_directory: null
+    tags: [lejepa, mimii, logmel, sigreg]

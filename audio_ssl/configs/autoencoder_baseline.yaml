@@ -1,0 +1,54 @@
+seed: 42
+
+data:
+  base_directory: ./dataset
+  normal_dir_name: normal
+  abnormal_dir_name: abnormal
+  ext: wav
+  channel: 0
+  cache_features: true
+
+feature:
+  n_mels: 64
+  frames: 5
+  n_fft: 1024
+  hop_length: 512
+  power: 2.0
+
+model:
+  hidden_dims: [64, 64, 8, 64, 64]
+
+fit:
+  epochs: 50
+  batch_size: 512
+  lr: 0.001
+  validation_split: 0.1
+  shuffle: true
+  num_workers: 4
+
+trainer:
+  accelerator: auto
+  devices: auto
+  num_nodes: 1
+  strategy: auto
+  precision: 32-true
+  log_every_n_steps: 20
+
+output:
+  directory: audio_ssl/outputs/autoencoder_baseline
+  result_file: result.yaml
+
+evaluation:
+  pauc_max_fpr: 0.1   # partial-AUC FPR cutoff (MIMII/DCASE standard); ROC png+npz per target
+
+logging:
+  comet:
+    enabled: true
+    online: true             # set false on Perlmutter compute nodes without outbound internet
+    workspace: null          # null -> COMET_WORKSPACE from .env
+    project: null            # null -> COMET_PROJECT_NAME from .env
+    offline_directory: null  # null -> <output.directory>/comet_offline (used only when online: false)
+    tags: [autoencoder, mimii, logmel]
+    # options: {}            # passthrough to Comet ExperimentConfig; git/env/code/CO2
+    #                        # auto-logging is disabled by default for HPC (see loggers.py)
+

@@ -1,0 +1,106 @@
+seed: 42
+
+data:
+  base_directory: ./dataset
+  normal_dir_name: normal
+  abnormal_dir_name: abnormal
+  ext: wav
+  channel: 0
+  machines: null   # null = all machines; e.g. [fan] for a single-machine experiment
+
+feature:
+  n_mels: 64
+  n_fft: 1024
+  hop_length: 512
+  power: 2.0
+  target_frames: 313   # ~10 s clip at hop 512 / 16 kHz; pad/crop to this
+
+model:
+  patch_mels: 16
+  patch_frames: 16
+  embed_dim: 256
+  depth: 6
+  heads: 4
+  predictor_dim: 128
+  predictor_depth: 4
+  predictor_heads: 4
+  mlp_ratio: 4.0
+  num_blocks: 4
+  mask_scale: [0.15, 0.3]
+  mask_aspect: [0.5, 2.0]
+  ema_start: 0.996
+  ema_end: 1.0
+
+fit:
+  epochs: 3000
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 0.05
+  warmup_frac: 0.1
+  lr_schedule: cosine   # cosine-to-0 (tie to budget) | constant (stationary, for duration ablations)
+  val_split: 0.02
+  num_workers: 8
+
+trainer:
+  accelerator: auto
+  devices: auto
+  num_nodes: 1
+  strategy: auto
+  precision: bf16-mixed   # A100-native, fp32 exponent range -> no fp16 overflow/jumps
+  gradient_clip_val: 1.0  # essential for ViT/JEPA stability (prevents loss blow-ups)
+  log_every_n_steps: 20
+
+scoring:
+  # Anomaly score = mean latent prediction error over N fixed-seed random masks (same
+  # block distribution as training), averaged per clip. Deterministic and stable.
+  num_masks: 16
+
+embedding:
+  # One-class scorer on frozen-encoder embeddings (no retraining). encoder=target (EMA)
+  # saw full clips during pretraining.
+  encoder: target          # target (EMA) or context
+  method: mahalanobis      # mahalanobis (Ledoit-Wolf) | knn (cosine) | gmm | flow
+  pca_dim: null            # whiten+reduce to this dim before density estimation (null=keep full)
+  knn_k: 4
+  gmm_components: 4        # for method: gmm
+  # method: flow — MAF + rational-quadratic splines (flow_type: rqs) with standardized
+  # inputs, seeded val split, early stopping on val NLL + best-weights restore (one-line
+  # summary printed per fit; curves in scorer.history). flow_type: realnvp = legacy
+  # bounded-affine couplings, kept for comparison. Pair with pca_dim ~32.
+  flow_type: rqs           # rqs | realnvp
+  flow_layers: 4
+  flow_hidden: 128
+  flow_bins: 8             # spline bins per dim per layer
+  flow_epochs: 400         # max epochs; early stopping usually ends sooner
+  flow_lr: 0.001
+  flow_val_frac: 0.15
+  flow_patience: 30
+  flow_weight_decay: 0.00001
+
+checkpoint:
+  every_n_epochs: 10   # keep a weights-only checkpoint every N epochs (for AUC-vs-step)
+
+monitor:
+  # Diagnostic AUC logged to Comet during training (embedding-distance on one target's
+  # TEST split). Reveals SSL over-optimization (AUC peaks then declines while loss drops).
+  # DIAGNOSTIC ONLY — do not use for final checkpoint selection.
+  enabled: true
+  target_dir: dataset/0_dB/fan/id_00
+  every_n_epochs: 1
+  metric_name: monitor_AUC   # uses the `embedding` scorer above
+
+output:
+  directory: audio_ssl/outputs/jepa_baseline
+  result_file: result.yaml
+
+evaluation:
+  pauc_max_fpr: 0.1
+
+logging:
+  comet:
+    enabled: true
+    online: true
+    workspace: null
+    project: null
+    offline_directory: null
+    tags: [jepa, mimii, logmel, latent-pred-error]

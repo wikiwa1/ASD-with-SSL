@@ -1,0 +1,12 @@
+extends: lejepa_baseline.yaml
+
+# LeJEPA trained on fans only (cross-machine transfer / single-machine specialization test).
+data:
+  machines: [fan]
+
+output:
+  directory: audio_ssl/outputs/lejepa_fan
+
+logging:
+  comet:
+    tags: [lejepa, mimii, logmel, sigreg, fan-only]
