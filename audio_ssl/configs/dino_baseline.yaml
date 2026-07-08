@@ -1,0 +1,108 @@
+seed: 42
+
+arch: dino   # selects LitDINO in training + embedding eval
+
+data:
+  base_directory: ./dataset
+  normal_dir_name: normal
+  abnormal_dir_name: abnormal
+  ext: wav
+  channel: 0
+  machines: null   # null = all machines; e.g. [fan] for a single-machine experiment
+
+feature:
+  # 128-mel log-mels (the notebook's resolution; frequency-band crops need the bins).
+  # DINO instance-normalizes per sample, so the librosa-vs-torchaudio dB convention
+  # difference from the notebook washes out.
+  n_mels: 128
+  n_fft: 1024
+  hop_length: 512
+  power: 2.0
+  target_frames: 313
+
+model:
+  # dino_asd_v2.ipynb recipe: frequency-band multi-crop self-distillation. Backbone is
+  # swappable (models/dino/backbones.py); resnet18 = the notebook's 512-d model.
+  # Planned backbones: vit, pretrained beats.
+  backbone: resnet18
+  out_dim: 1024        # prototype count
+  head_hidden: 512
+  head_bottleneck: 64
+  n_global: 2          # teacher sees these (60% of mel bins each)
+  n_local: 6           # student-only crops (25% of mel bins)
+  global_frac: 0.6
+  local_frac: 0.25
+  crop_mels: 128       # all crops resized to this input
+  crop_frames: 128
+  teacher_temp: 0.04
+  student_temp: 0.1
+  center_momentum: 0.9
+  ema_momentum: 0.996  # constant (notebook); no schedule
+
+augment:
+  time_mask_frames: 24
+  noise_std: 0.05
+  extra_augs: false    # random-erasing + gain shift (the notebook's "extra augs" run)
+  gain_scale: 1.0
+
+fit:
+  epochs: 400
+  batch_size: 128      # 8 crops/clip -> effective backbone batch 8x this
+  lr: 0.0005
+  weight_decay: 0.04
+  warmup_frac: 0.0
+  lr_schedule: constant   # notebook parity; cosine available
+  val_split: 0.02
+  num_workers: 8
+
+trainer:
+  accelerator: auto
+  devices: auto
+  num_nodes: 1
+  strategy: auto
+  precision: bf16-mixed   # notebook used bf16 autocast
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+
+embedding:
+  # One-class scorer on frozen BACKBONE features (512-d for resnet18); the DINO head
+  # is pretext-only. encoder=target is the EMA teacher (standard DINO eval choice).
+  encoder: target
+  method: mahalanobis
+  pca_dim: null
+  knn_k: 4
+  gmm_components: 4
+  flow_type: rqs
+  flow_layers: 4
+  flow_hidden: 128
+  flow_bins: 8
+  flow_epochs: 400
+  flow_lr: 0.001
+  flow_val_frac: 0.15
+  flow_patience: 30
+  flow_weight_decay: 0.00001
+
+checkpoint:
+  every_n_epochs: 10
+
+monitor:
+  enabled: true
+  target_dir: dataset/0_dB/fan/id_00
+  every_n_epochs: 1
+  metric_name: monitor_AUC
+
+output:
+  directory: audio_ssl/outputs/dino_baseline
+  result_file: result.yaml
+
+evaluation:
+  pauc_max_fpr: 0.1
+
+logging:
+  comet:
+    enabled: true
+    online: true
+    workspace: null
+    project: null
+    offline_directory: null
+    tags: [dino, mimii, logmel, freq-band-crops, resnet18]

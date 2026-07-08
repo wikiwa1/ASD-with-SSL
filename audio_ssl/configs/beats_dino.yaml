@@ -1,0 +1,55 @@
+extends: dino_baseline.yaml
+
+# BEATs-initialised DINO (dino_asd_v2.ipynb cells 23-25): finetune pretrained BEATs
+# with DINO self-distillation instead of masked prediction. Crops are TIME segments of
+# the cached fbanks (BEATs builds its own frequency representation; freq-band crops
+# don't apply), light noise is the only augmentation, and only the top-2 transformer
+# layers + DINO head train, at a gentle lr (1e-5).
+
+feature:
+  frontend: beats_fbank
+  n_mels: 128
+  target_frames: 998
+  # (n_fft/hop/power inherited keys are ignored by the beats_fbank frontend)
+
+model:
+  backbone: beats
+  beats_checkpoint: audio_ssl/pretrained/BEATs_iter3_plus_AS2M.pt
+  finetune_last_n: 2
+  crop_axis: time      # global/local crops = long/short time segments, native resolution
+  input_norm: none     # fbank cache is already BEATs-normalized
+  out_dim: 1024
+  n_global: 2
+  n_local: 4           # notebook: 2 global (60%) + 4 local (30%)
+  global_frac: 0.6
+  local_frac: 0.3
+  teacher_temp: 0.04
+  student_temp: 0.1
+  center_momentum: 0.9
+  ema_momentum: 0.996
+
+augment:
+  time_mask_frames: 0  # notebook: light additive noise ONLY for the BEATs variant
+  noise_std: 0.05
+  extra_augs: false
+
+fit:
+  epochs: 60           # continued finetune converges fast (notebook used 30 per target)
+  batch_size: 32       # 6 crops/clip through a 90M transformer; bf16 on A100-40GB
+  lr: 0.00001          # notebook: 1e-5 — pretrained weights want a gentle touch
+  weight_decay: 0.04
+  lr_schedule: constant
+
+embedding:
+  # match the beats_jepa zero-shot eval (768-d mean-pooled tokens -> pca128 mahalanobis)
+  pca_dim: 128
+
+checkpoint:
+  every_n_epochs: 5
+
+output:
+  directory: audio_ssl/outputs/beats_dino
+
+logging:
+  comet:
+    tags: [dino, beats, mimii, pretrained, time-crops]

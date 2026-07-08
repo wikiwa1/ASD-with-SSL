@@ -27,6 +27,12 @@ class BEATsEncoder(nn.Module):
         super().__init__()
         self.cfg = BEATsConfig(dict(beats_cfg))
         self.cfg.finetuned_model = False  # never want the AudioSet classifier head
+        # The AS2M checkpoint ships encoder_layerdrop=0.05 (random whole-layer skipping
+        # during training). With only the last N layers trainable, a step that drops one
+        # of them produces no grads for it and DDP aborts ("parameters not used in the
+        # loss" — killed run beats_jepa_20260704_fuzzy_heron_3684 at step 14). Layer-
+        # dropping the few layers we finetune is undesirable regardless; disable it.
+        self.cfg.encoder_layerdrop = 0.0
         self.model = BEATs(self.cfg)
         if checkpoint_path is not None:
             state = torch.load(str(checkpoint_path), map_location="cpu", weights_only=True)

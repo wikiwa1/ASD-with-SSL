@@ -10,6 +10,9 @@ def load_ssl_module(config: dict, checkpoint_path, device):
     if arch == "lejepa":
         from audio_ssl.src.lightning.lejepa_module import LitLeJEPA
         return LitLeJEPA.load_from_checkpoint(str(checkpoint_path), map_location=device)
+    if arch == "dino":
+        from audio_ssl.src.lightning.dino_module import LitDINO
+        return LitDINO.load_from_checkpoint(str(checkpoint_path), map_location=device)
     if arch == "beats":
         from audio_ssl.src.lightning.beats_jepa_module import LitBEATsJEPA
         # beats_checkpoint=None: the Lightning ckpt carries all weights; the original

@@ -36,5 +36,5 @@ else
 fi
 echo "WALLTIME: $WALLTIME   ACCOUNT: $ACCOUNT   CONFIG: $CONFIG"
 
-salloc -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
+salloc -J asd-beats -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
   bash "$REPO/audio_ssl/scripts/run_beats_jepa_inside.sh"

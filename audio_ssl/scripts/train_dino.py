@@ -7,6 +7,7 @@ except ImportError:
 
 import argparse
 import os
+from pathlib import Path
 
 import lightning.pytorch as pl
 import numpy as np
@@ -18,21 +19,20 @@ from audio_ssl.src.data.jepa_datamodule import JEPASpectrogramDataModule
 from audio_ssl.src.data.splits import make_baseline_split
 from audio_ssl.src.features.frontends import stack_features
 from audio_ssl.src.lightning.auc_monitor import PeriodicAUCMonitor
-from audio_ssl.src.lightning.lejepa_module import LitLeJEPA
+from audio_ssl.src.lightning.dino_module import LitDINO
 from audio_ssl.src.utils.config import load_config, merge_cli_overrides
 from audio_ssl.src.utils.io import ensure_dir, write_yaml
 from audio_ssl.src.utils.loggers import build_loggers, comet_experiment_key, end_experiments, load_env
 from audio_ssl.src.utils.runs import create_run_dir, feature_cache_root
 from audio_ssl.src.utils.seed import seed_everything
 from audio_ssl.src.utils.slurm import slurm_ddp_plugins
-from pathlib import Path
 
 RUN_KEY = "jepa_global"  # shared checkpoint subdir so the embedding eval finds it
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pretrain LeJEPA (view-invariance + SIGReg) on normal MIMII.")
-    parser.add_argument("--config", default="audio_ssl/configs/lejepa_baseline.yaml")
+    parser = argparse.ArgumentParser(description="DINO pretraining (frequency-band multi-crop) on normal MIMII.")
+    parser.add_argument("--config", default="audio_ssl/configs/dino_baseline.yaml")
     parser.add_argument("--base-directory")
     parser.add_argument("--run-dir")
     parser.add_argument("--max-epochs", type=int)
@@ -55,7 +55,6 @@ def main() -> None:
     fit_cfg = config["fit"]
     trainer_cfg = config["trainer"]
     model_cfg = config["model"]
-    lejepa_cfg = config.get("lejepa", {})
 
     base_output = config["output"]["directory"]
     output_dir = ensure_dir(args.run_dir) if args.run_dir else create_run_dir(base_output)
@@ -63,7 +62,8 @@ def main() -> None:
     log_root = ensure_dir(output_dir / "logs")
     cache_path = feature_cache_root(base_output) / f"jepa_specs_{feature_cfg['n_mels']}m_{feature_cfg['target_frames']}t.npy"
     print(f"RUN DIR: {output_dir}", flush=True)
-    if global_rank_from_env() == 0:
+    global_rank = global_rank_from_env()
+    if global_rank == 0:
         cfg_tmp = output_dir / f".config.{os.getpid()}.tmp"
         write_yaml(cfg_tmp, config)
         cfg_tmp.replace(output_dir / "config.yaml")
@@ -77,7 +77,6 @@ def main() -> None:
         val_split=float(fit_cfg.get("val_split", 0.02)), seed=int(config.get("seed", 42)),
         cache_path=cache_path,
     )
-    global_rank = global_rank_from_env()
     if global_rank == 0:
         datamodule.setup()
     else:
@@ -86,27 +85,50 @@ def main() -> None:
             time.sleep(10)
         datamodule.setup()
 
-    module = LitLeJEPA(
-        n_mels=int(feature_cfg["n_mels"]), target_frames=int(feature_cfg["target_frames"]),
-        patch_mels=int(model_cfg["patch_mels"]), patch_frames=int(model_cfg["patch_frames"]),
-        embed_dim=int(model_cfg["embed_dim"]), depth=int(model_cfg["depth"]),
-        heads=int(model_cfg["heads"]), mlp_ratio=float(model_cfg.get("mlp_ratio", 4.0)),
-        num_views=int(lejepa_cfg.get("num_views", 4)), lam=float(lejepa_cfg.get("lam", 0.05)),
-        sigreg_slices=int(lejepa_cfg.get("sigreg_slices", 512)),
-        sigreg_points=int(lejepa_cfg.get("sigreg_points", 17)),
+    backbone = model_cfg.get("backbone", "resnet18")
+    backbone_cfg = None
+    if backbone == "beats":
+        from audio_ssl.src.models.beats_jepa.encoder import BEATsEncoder
+        backbone_cfg = {
+            "beats_cfg": BEATsEncoder.load_pretrained_cfg(model_cfg["beats_checkpoint"]),
+            "beats_checkpoint": model_cfg["beats_checkpoint"],
+            "finetune_last_n": int(model_cfg.get("finetune_last_n", 2)),
+            "target_frames": int(feature_cfg["target_frames"]),
+        }
+
+    module = LitDINO(
+        backbone=backbone,
+        backbone_cfg=backbone_cfg,
+        crop_axis=model_cfg.get("crop_axis", "freq"),
+        input_norm=model_cfg.get("input_norm", "instance"),
+        out_dim=int(model_cfg.get("out_dim", 1024)),
+        head_hidden=int(model_cfg.get("head_hidden", 512)),
+        head_bottleneck=int(model_cfg.get("head_bottleneck", 64)),
+        n_global=int(model_cfg.get("n_global", 2)), n_local=int(model_cfg.get("n_local", 6)),
+        global_frac=float(model_cfg.get("global_frac", 0.6)),
+        local_frac=float(model_cfg.get("local_frac", 0.25)),
+        crop_mels=int(model_cfg.get("crop_mels", 128)),
+        crop_frames=int(model_cfg.get("crop_frames", 128)),
+        teacher_temp=float(model_cfg.get("teacher_temp", 0.04)),
+        student_temp=float(model_cfg.get("student_temp", 0.1)),
+        center_momentum=float(model_cfg.get("center_momentum", 0.9)),
+        ema_momentum=float(model_cfg.get("ema_momentum", 0.996)),
         augment=config.get("augment", {}),
-        lr=float(fit_cfg["lr"]), weight_decay=float(fit_cfg.get("weight_decay", 0.05)),
-        warmup_frac=float(fit_cfg.get("warmup_frac", 0.1)),
-        lr_schedule=fit_cfg.get("lr_schedule", "cosine"),
-        mel_mean=datamodule.mel_mean, mel_std=datamodule.mel_std,
+        lr=float(fit_cfg["lr"]), weight_decay=float(fit_cfg.get("weight_decay", 0.04)),
+        warmup_frac=float(fit_cfg.get("warmup_frac", 0.0)),
+        lr_schedule=fit_cfg.get("lr_schedule", "constant"),
     )
 
     loggers = build_loggers(
         run_name=output_dir.name, csv_save_dir=log_root, config=config,
-        extra_params={"run": output_dir.name, "arch": "lejepa", "n_train_files": len(train_files),
-                      "embed_dim": int(model_cfg["embed_dim"]), "num_views": int(lejepa_cfg.get("num_views", 4)),
-                      "lam": float(lejepa_cfg.get("lam", 0.05)), "fit/epochs": int(fit_cfg["epochs"]),
-                      "fit/lr": float(fit_cfg["lr"]), **{f"feature/{k}": v for k, v in feature_cfg.items()}},
+        extra_params={"run": output_dir.name, "arch": "dino", "n_train_files": len(train_files),
+                      "backbone": model_cfg.get("backbone", "resnet18"),
+                      "out_dim": int(model_cfg.get("out_dim", 1024)),
+                      "n_global": int(model_cfg.get("n_global", 2)),
+                      "n_local": int(model_cfg.get("n_local", 6)),
+                      "fit/epochs": int(fit_cfg["epochs"]), "fit/lr": float(fit_cfg["lr"]),
+                      "fit/batch_size": int(fit_cfg["batch_size"]),
+                      **{f"feature/{k}": v for k, v in feature_cfg.items()}},
     )
     experiment_key = comet_experiment_key(loggers)
     if experiment_key and global_rank == 0:

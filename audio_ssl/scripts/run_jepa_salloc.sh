@@ -27,5 +27,5 @@ echo "RUN DIR : $RUNDIR"
 echo "PRETRAIN: DDP over $NTASKS GPUs ($NODES nodes x $GPUS_PER_NODE)"
 echo "WALLTIME: $WALLTIME   ACCOUNT: $ACCOUNT   CONFIG: $CONFIG"
 
-salloc -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
+salloc -J asd-jepa -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
   bash "$REPO/audio_ssl/scripts/run_jepa_inside.sh"

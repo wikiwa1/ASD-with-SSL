@@ -25,6 +25,7 @@ from audio_ssl.src.utils.io import ensure_dir, write_yaml
 from audio_ssl.src.utils.loggers import build_loggers, comet_experiment_key, end_experiments, load_env
 from audio_ssl.src.utils.runs import create_run_dir, feature_cache_root
 from audio_ssl.src.utils.seed import seed_everything
+from audio_ssl.src.utils.slurm import slurm_ddp_plugins
 
 RUN_KEY = "jepa_global"  # one global encoder -> one checkpoint dir / Comet experiment
 
@@ -213,6 +214,7 @@ def main() -> None:
         log_every_n_steps=int(trainer_cfg.get("log_every_n_steps", 20)),
         callbacks=callbacks,
         logger=loggers,
+        plugins=slurm_ddp_plugins(),
     )
     trainer.fit(module, datamodule=datamodule)
     end_experiments(loggers)

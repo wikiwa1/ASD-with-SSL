@@ -45,7 +45,7 @@ class PeriodicAUCMonitor(pl.Callback):
 
     @torch.inference_mode()
     def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        if not trainer.is_global_zero:
+        if not trainer.is_global_zero or getattr(trainer, "sanity_checking", False):
             return
         if (trainer.current_epoch + 1) % self.every_n_epochs != 0:
             return

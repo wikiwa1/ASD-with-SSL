@@ -35,5 +35,5 @@ if [ "$NTARGETS" -eq 0 ]; then
   echo "ERROR: no targets found under dataset/ (expected 48)"; exit 1
 fi
 
-salloc -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
+salloc -J asd-ae -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
   bash "$REPO/audio_ssl/scripts/run_baseline_inside.sh"

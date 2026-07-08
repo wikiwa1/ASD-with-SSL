@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
-# One-shot global LeJEPA (Balestriero & LeCun 2025): allocate N interactive GPU nodes,
-# pretrain one encoder on all normal MIMII via view-invariance + SIGReg (DDP), then score
-# every target by one-class distance on frozen embeddings and aggregate the machine x SNR
-# table. Comparable to the JEPA embedding eval (AUC ~0.82) and AE baseline (~0.717).
+# One-shot DINO: allocate N interactive GPU nodes, pretrain with frequency-band
+# multi-crop self-distillation (DDP), then embedding-distance eval + machine x SNR table.
 #
 # Usage:
-#   bash audio_ssl/scripts/run_lejepa_salloc.sh [NODES] [WALLTIME]
-#   bash audio_ssl/scripts/run_lejepa_salloc.sh              # 1 node (4 GPUs), 4h
-#   bash audio_ssl/scripts/run_lejepa_salloc.sh 4 04:00:00   # 4 nodes (16 GPUs)
-#   CONFIG=audio_ssl/configs/lejepa_fan.yaml bash audio_ssl/scripts/run_lejepa_salloc.sh
+#   bash audio_ssl/scripts/run_dino_salloc.sh [NODES] [WALLTIME]
+#   CONFIG=audio_ssl/configs/dino_fan.yaml bash audio_ssl/scripts/run_dino_salloc.sh
 set -euo pipefail
 
 export REPO=/pscratch/sd/d/dfarough/ASD-with-SSL
-export CONFIG="${CONFIG:-audio_ssl/configs/lejepa_baseline.yaml}"
+export CONFIG="${CONFIG:-audio_ssl/configs/dino_baseline.yaml}"
 export NODES="${1:-1}"
 export GPUS_PER_NODE=4
 export NTASKS=$(( NODES * GPUS_PER_NODE ))
@@ -31,5 +27,5 @@ echo "RUN DIR : $RUNDIR"
 echo "PRETRAIN: DDP over $NTASKS GPUs ($NODES nodes x $GPUS_PER_NODE)"
 echo "WALLTIME: $WALLTIME   ACCOUNT: $ACCOUNT   CONFIG: $CONFIG"
 
-salloc -J asd-lejepa -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
-  bash "$REPO/audio_ssl/scripts/run_lejepa_inside.sh"
+salloc -J asd-dino -N "$NODES" -C gpu --gpus-per-node="$GPUS_PER_NODE" -q interactive -t "$WALLTIME" -A "$ACCOUNT" \
+  bash "$REPO/audio_ssl/scripts/run_dino_inside.sh"

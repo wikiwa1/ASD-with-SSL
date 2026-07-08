@@ -1,0 +1,12 @@
+extends: dino_baseline.yaml
+
+# DINO trained on fans only (matches jepa_fan / lejepa_fan / beats_fan experiments).
+data:
+  machines: [fan]
+
+output:
+  directory: audio_ssl/outputs/dino_fan
+
+logging:
+  comet:
+    tags: [dino, mimii, logmel, freq-band-crops, resnet18, fan-only]
