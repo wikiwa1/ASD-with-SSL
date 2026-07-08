@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dino_asd"
+version = "0.1.0"
+description = "Self-supervised acoustic anomaly detection (MIMII) with DINO."
+requires-python = ">=3.9"
+# torch / torchvision / torchaudio / pandas / matplotlib / seaborn are omitted on
+# purpose: Colab ships them preinstalled (with the right CUDA build), and pinning
+# them here would risk clobbering that. Only the extras Colab usually lacks:
+dependencies = [
+    "numpy",
+    "soundfile",
+    "librosa",
+    "scikit-learn",
+]
+
+[tool.setuptools]
+packages = ["dino_asd"]
