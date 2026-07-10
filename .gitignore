@@ -1,4 +1,5 @@
 # data
+data/
 dataset/
 dataset_colab/
 fan/
@@ -23,3 +24,8 @@ __pycache__/
 
 # experiment outputs
 audio_ssl/outputs/
+
+# editor / harness (local, not project artifacts)
+.vscode/
+.mcp.json
+.claude/

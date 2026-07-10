@@ -5,6 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dino_asd"
 version = "0.1.0"
+# This file packages ONLY the DINO method (dino_asd/), whose notebook runs on
+# Colab. The autoencoder/JEPA infrastructure (audio_ssl/) is a separate,
+# HPC-oriented package installed from requirements*.txt — see the root README.
 description = "Self-supervised acoustic anomaly detection (MIMII) with DINO."
 requires-python = ">=3.9"
 # torch / torchvision / torchaudio / pandas / matplotlib / seaborn are omitted on
